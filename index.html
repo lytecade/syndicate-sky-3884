@@ -102,6 +102,7 @@
     background: rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
+    gap: 10px;
   }
   .screen-overlay.hidden { display: none; }
 
@@ -112,21 +113,18 @@
     text-shadow: 0 0 20px var(--sky), 0 0 40px rgba(49, 162, 242, 0.4);
     letter-spacing: 4px;
     text-align: center;
-    margin-bottom: 6px;
   }
   .screen-subtitle {
     font-size: clamp(12px, 2.5vw, 18px);
     color: var(--yellow);
     letter-spacing: 6px;
     text-transform: uppercase;
-    margin-bottom: 24px;
   }
   .screen-info {
     color: var(--gray);
     font-size: clamp(11px, 2vw, 14px);
     text-align: center;
     line-height: 1.8;
-    margin-bottom: 20px;
   }
   .screen-info .key {
     color: var(--cyan);
@@ -173,17 +171,17 @@
   #finalScore {
     color: var(--yellow);
     font-size: 24px;
-    margin: 10px 0 6px;
+    text-align: center;
   }
   #finalWave {
     color: var(--pink);
     font-size: 14px;
-    margin-bottom: 4px;
+    text-align: center;
   }
   #highScoreText {
     color: var(--lime);
     font-size: 13px;
-    margin-bottom: 16px;
+    text-align: center;
   }
 
   /* Blink animation */
@@ -263,7 +261,7 @@
     <span class="mobile-hint">📱 TAP &amp; DRAG TO MOVE — DOUBLE TAP TO FIRE</span>
   </div>
   <button id="startBtn" class="btn">LAUNCH</button>
-  <p class="blink" style="color:var(--sky); margin-top:16px; font-size:13px;">PRESS SPACE OR TAP TO START</p>
+  <p class="blink" style="color:var(--sky); font-size:13px; margin-top:14px;">PRESS SPACE OR TAP TO START</p>
 </div>
 
 <!-- Game-over screen -->
