@@ -1009,15 +1009,15 @@
     ctx.translate(ex, ey);
 
     if (e.type === 'basic') {
-      drawEnemyBasic(flash);
+      drawEnemyBasic(e, flash);
     } else if (e.type === 'fast') {
-      drawEnemyFast(flash);
+      drawEnemyFast(e, flash);
     } else if (e.type === 'tank') {
-      drawEnemyTank(flash);
+      drawEnemyTank(e, flash);
     } else if (e.type === 'shooter') {
-      drawEnemyShooter(flash);
+      drawEnemyShooter(e, flash);
     } else if (e.type === 'zigzag') {
-      drawEnemyZigzag(flash);
+      drawEnemyZigzag(e, flash);
     } else if (e.type === 'boss') {
       drawBoss(e);
     }
@@ -1025,7 +1025,7 @@
     ctx.restore();
   }
 
-  function drawEnemyBasic(flash) {
+  function drawEnemyBasic(e, flash) {
     const col = flash ? C.white : C.red;
     const col2 = flash ? C.yellow : C.navy;
     // Body
@@ -1051,7 +1051,7 @@
     ctx.fillRect(1, -18, 3, 4);
   }
 
-  function drawEnemyFast(flash) {
+  function drawEnemyFast(e, flash) {
     const col = flash ? C.white : C.orange;
     // Sleek body
     ctx.fillStyle = col;
@@ -1072,7 +1072,7 @@
     ctx.fillRect(11, -4, 3, 6);
   }
 
-  function drawEnemyTank(flash) {
+  function drawEnemyTank(e, flash) {
     const col = flash ? C.white : C.brown;
     const col2 = flash ? C.yellow : C.teal;
     // Heavy body
@@ -1097,14 +1097,14 @@
     ctx.fillStyle = C.yellow;
     ctx.fillRect(-2, -8, 4, 2);
     // HP bar
-    if (e.hp > 1 && e.maxHp) {
-      const hpRatio = e.hp / e.maxHp;
+    if (e.hp > 1) {
+      const hpRatio = e.hp / (e.maxHp || e.hp);
       ctx.fillStyle = C.green;
       ctx.fillRect(-20, -24, 40 * hpRatio, 3);
     }
   }
 
-  function drawEnemyShooter(flash) {
+  function drawEnemyShooter(e, flash) {
     const col = flash ? C.white : C.pink;
     // Body
     ctx.fillStyle = col;
@@ -1135,7 +1135,7 @@
     ctx.fill();
   }
 
-  function drawEnemyZigzag(flash) {
+  function drawEnemyZigzag(e, flash) {
     const col = flash ? C.white : C.ochre;
     // Diamond body
     ctx.fillStyle = col;
