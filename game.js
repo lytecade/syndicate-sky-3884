@@ -431,6 +431,25 @@
   // UPDATE
   // ---------------------------------------------------------------------------
   function update() {
+    if (state === 'start') {
+      // ---- Starfield ----
+      const starSpeedMult = 1;
+      stars.forEach(s => {
+        s.y += s.speed * starSpeedMult;
+        if (s.y > CH) {
+          s.y = 0;
+          s.x = Math.random() * CW;
+        }
+      });
+
+      // ---- Grid lines ----
+      gridLines.forEach(g => {
+        g.y += g.speed * starSpeedMult;
+        if (g.y > CH) g.y -= CH;
+      });
+      return;
+    }
+
     if (state !== 'playing') return;
 
     // ---- Player movement ----
