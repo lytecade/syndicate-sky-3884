@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Syndicate Sky 3884</title>
 <style>
 /* ============================================================
@@ -44,6 +44,8 @@
     align-items: center;
     width: 100vw;
     height: 100vh;
+    width: 100dvw;
+    height: 100dvh;
     overflow: hidden;
     font-family: 'Courier New', Courier, monospace;
     touch-action: none;
@@ -70,22 +72,23 @@
     z-index: 10;
     display: flex;
     justify-content: center;
-    padding: 8px 0;
+    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 4px max(8px, env(safe-area-inset-left));
   }
   #hud-inner {
     display: flex;
-    gap: 20px;
+    gap: clamp(8px, 2.5vmin, 20px);
     background: rgba(27, 38, 50, 0.85);
     border: 1px solid var(--blue);
     border-radius: 4px;
-    padding: 6px 16px;
-    font-size: 13px;
+    padding: clamp(4px, 1vmin, 6px) clamp(10px, 2.5vmin, 16px);
+    font-size: clamp(11px, 2.2vmin, 14px);
     color: var(--cyan);
     align-items: center;
     flex-wrap: wrap;
     justify-content: center;
+    max-width: calc(100vw - 16px);
   }
-  #score       { color: var(--yellow); font-weight: bold; font-size: 15px; }
+  #score       { color: var(--yellow); font-weight: bold; font-size: clamp(12px, 2.5vmin, 15px); }
   #lives       { color: var(--pink); }
   #wave        { color: var(--cyan); }
   #power       { color: var(--lime); }
@@ -102,12 +105,16 @@
     background: rgba(0, 0, 0, 0.75);
     backdrop-filter: blur(2px);
     -webkit-backdrop-filter: blur(2px);
-    gap: 10px;
+    gap: clamp(6px, 2vmin, 12px);
+    padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    overflow-y: auto;
+    max-height: 100vh;
+    max-height: 100dvh;
   }
-  .screen-overlay.hidden { display: none; }
+  .screen-overlay.hidden { display: none !important; }
 
   .screen-title {
-    font-size: clamp(28px, 6vw, 52px);
+    font-size: clamp(22px, 7vmin, 52px);
     font-weight: bold;
     color: var(--cyan);
     text-shadow: 0 0 20px var(--sky), 0 0 40px rgba(49, 162, 242, 0.4);
@@ -115,23 +122,24 @@
     text-align: center;
   }
   .screen-subtitle {
-    font-size: clamp(12px, 2.5vw, 18px);
+    font-size: clamp(11px, 2.8vmin, 18px);
     color: var(--yellow);
     letter-spacing: 6px;
     text-transform: uppercase;
   }
   .screen-info {
     color: var(--gray);
-    font-size: clamp(11px, 2vw, 14px);
+    font-size: clamp(10px, 2.2vmin, 14px);
     text-align: center;
-    line-height: 1.8;
+    line-height: 1.6;
+    max-width: 92vw;
   }
   .screen-info .key {
     color: var(--cyan);
     border: 1px solid var(--blue);
     padding: 1px 6px;
     border-radius: 3px;
-    font-size: 12px;
+    font-size: clamp(10px, 2vmin, 12px);
   }
   .screen-info .mobile-hint {
     color: var(--sky);
@@ -143,9 +151,9 @@
     background: var(--navy);
     color: var(--cyan);
     border: 2px solid var(--sky);
-    padding: 12px 32px;
+    padding: clamp(8px, 2vmin, 12px) clamp(20px, 5vmin, 32px);
     font-family: 'Courier New', monospace;
-    font-size: 16px;
+    font-size: clamp(13px, 2.8vmin, 16px);
     font-weight: bold;
     cursor: pointer;
     letter-spacing: 2px;
@@ -170,17 +178,17 @@
 
   #finalScore {
     color: var(--yellow);
-    font-size: 24px;
+    font-size: clamp(18px, 4.5vmin, 24px);
     text-align: center;
   }
   #finalWave {
     color: var(--pink);
-    font-size: 14px;
+    font-size: clamp(12px, 2.6vmin, 14px);
     text-align: center;
   }
   #highScoreText {
     color: var(--lime);
-    font-size: 13px;
+    font-size: clamp(11px, 2.4vmin, 13px);
     text-align: center;
   }
 
@@ -219,15 +227,36 @@
   /* Mobile touch controls hint */
   .touch-controls-hint {
     position: fixed;
-    bottom: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom));
     left: 50%;
     transform: translateX(-50%);
     color: var(--gray);
-    font-size: 11px;
+    font-size: clamp(10px, 2vmin, 12px);
     opacity: 0.6;
     pointer-events: none;
     z-index: 10;
     text-align: center;
+    white-space: nowrap;
+  }
+  .touch-controls-hint.hidden { display: none; }
+
+  /* Compact adjustments for short landscape viewports (e.g. rotated mobile) */
+  @media (max-height: 500px) {
+    .screen-overlay {
+      gap: 4px;
+      padding-top: max(10px, env(safe-area-inset-top));
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+    }
+    .screen-info {
+      line-height: 1.4;
+    }
+    .btn {
+      padding: 6px 20px;
+    }
+    #startScreen .blink {
+      margin-top: 4px !important;
+      font-size: 11px !important;
+    }
   }
 </style>
 </head>
@@ -274,7 +303,7 @@
 </div>
 
 <!-- Mobile hint -->
-<div class="touch-controls-hint">TAP &amp; DRAG TO MOVE — DOUBLE TAP TO FIRE</div>
+<div class="touch-controls-hint hidden">TAP &amp; DRAG TO MOVE — DOUBLE TAP TO FIRE</div>
 
 <!-- Game logic -->
 <script src="game.js"></script>

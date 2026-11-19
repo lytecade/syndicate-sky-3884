@@ -29,16 +29,20 @@
   };
 
   // ---------------------------------------------------------------------------
-  // Canvas constants – square canvas, 800×800
+  // Canvas constants – dynamic logical resolution normalized around BASE_SIZE
   // ---------------------------------------------------------------------------
-  const CW = 800;
-  const CH = 800;
+  const BASE_SIZE = 800;
+  const MIN_LOGICAL_SHORT_SIDE = 480;
+  let CW = BASE_SIZE;
+  let CH = BASE_SIZE;
+  let dpr = 1;
+  let initialized = false;
 
   // ---------------------------------------------------------------------------
   // DOM refs (assigned once after DOMContentLoaded)
   // ---------------------------------------------------------------------------
   let canvas, ctx;
-  let scoreEl, livesEl, waveEl, powerEl;
+  let scoreEl, livesEl, waveEl, powerEl, hudInnerEl, touchHintEl;
   let startScreen, gameOverScreen;
 
   // ---------------------------------------------------------------------------
@@ -103,18 +107,50 @@
   function init() {
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
-    canvas.width = CW;
-    canvas.height = CH;
 
     scoreEl = document.getElementById('score');
     livesEl = document.getElementById('lives');
     waveEl = document.getElementById('wave');
     powerEl = document.getElementById('power');
+    hudInnerEl = document.getElementById('hud-inner');
+    touchHintEl = document.querySelector('.touch-controls-hint');
     startScreen = document.getElementById('startScreen');
     gameOverScreen = document.getElementById('gameOver');
 
-    // Generate starfield
-    for (let i = 0; i < 150; i++) {
+    scaleCanvas();
+    player.x = CW / 2;
+    player.y = Math.max(player.h / 2 + 10, CH - 100);
+
+    rebuildStarfield();
+    rebuildGridLines();
+    initialized = true;
+
+    setupInput();
+    setupTouch();
+
+    window.addEventListener('resize', scaleCanvas);
+    window.addEventListener('orientationchange', () => {
+      scaleCanvas();
+      setTimeout(scaleCanvas, 120);
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', scaleCanvas);
+    }
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Starfield & grid helpers
+  // ---------------------------------------------------------------------------
+  function getTargetStarCount() {
+    return Math.max(80, Math.round(150 * (CW * CH) / (BASE_SIZE * BASE_SIZE)));
+  }
+
+  function rebuildStarfield() {
+    const targetCount = getTargetStarCount();
+    stars = [];
+    for (let i = 0; i < targetCount; i++) {
       stars.push({
         x: Math.random() * CW,
         y: Math.random() * CH,
@@ -123,30 +159,100 @@
         brightness: Math.random(),
       });
     }
+  }
 
-    // Generate horizontal grid lines for cyberpunk feel
+  function rebuildGridLines() {
+    gridLines = [];
     for (let y = 0; y < CH; y += 50) {
       gridLines.push({ y: y, speed: 0.8 });
     }
+  }
 
-    setupInput();
-    setupTouch();
-    scaleCanvas();
-    window.addEventListener('resize', scaleCanvas);
+  function remapEntities(oldCW, oldCH, newCW, newCH) {
+    const ratioX = newCW / oldCW;
+    const ratioY = newCH / oldCH;
 
-    requestAnimationFrame(gameLoop);
+    player.x = Math.max(player.w / 2 + 10, Math.min(newCW - player.w / 2 - 10, player.x * ratioX));
+    player.y = Math.max(player.h / 2 + 10, Math.min(newCH - player.h / 2 - 10, player.y * ratioY));
+
+    const scalePoint = (obj) => {
+      obj.x *= ratioX;
+      obj.y *= ratioY;
+    };
+
+    bullets.forEach(scalePoint);
+    enemyBullets.forEach(scalePoint);
+    bossBullets.forEach(scalePoint);
+    powerups.forEach(scalePoint);
+    particles.forEach(scalePoint);
+    explosions.forEach(scalePoint);
+
+    enemies.forEach((e) => {
+      scalePoint(e);
+      e.x = Math.max(e.w / 2 + 12, Math.min(newCW - e.w / 2 - 12, e.x));
+      if (e.type === 'boss') {
+        e.targetY = Math.min(100, newCH * 0.2);
+        if (!e.entering) {
+          e.y = Math.max(60, Math.min(Math.min(180, newCH * 0.35), e.y));
+        }
+      }
+    });
+
+    const targetStars = getTargetStarCount();
+    stars.forEach((s) => {
+      s.x = (s.x * ratioX) % newCW;
+      s.y = (s.y * ratioY) % newCH;
+    });
+    while (stars.length < targetStars) {
+      stars.push({
+        x: Math.random() * newCW,
+        y: Math.random() * newCH,
+        speed: 0.3 + Math.random() * 2.5,
+        size: Math.random() < 0.2 ? 3 : (Math.random() < 0.5 ? 2 : 1),
+        brightness: Math.random(),
+      });
+    }
+    if (stars.length > targetStars) {
+      stars.length = targetStars;
+    }
+
+    rebuildGridLines();
   }
 
   // ---------------------------------------------------------------------------
-  // Canvas scaling — keep square aspect, fit to viewport
+  // Canvas scaling — dynamic resolution & aspect ratio to fit viewport
   // ---------------------------------------------------------------------------
   function scaleCanvas() {
-    const margin = 10;
-    const availW = window.innerWidth - margin * 2;
-    const availH = window.innerHeight - margin * 2;
-    const size = Math.min(availW, availH);
-    canvas.style.width = size + 'px';
-    canvas.style.height = size + 'px';
+    const vpW = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+    const vpH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    const margin = Math.min(vpW, vpH) < 600 ? 4 : 12;
+    const displayW = Math.max(200, Math.floor(vpW - margin));
+    const displayH = Math.max(200, Math.floor(vpH - margin));
+    const aspect = displayW / displayH;
+
+    let newCW, newCH;
+    if (aspect >= 1) {
+      newCH = Math.max(MIN_LOGICAL_SHORT_SIDE, Math.round(BASE_SIZE / Math.sqrt(aspect)));
+      newCW = Math.round(newCH * aspect);
+    } else {
+      newCW = Math.max(MIN_LOGICAL_SHORT_SIDE, Math.round(BASE_SIZE * Math.sqrt(aspect)));
+      newCH = Math.round(newCW / aspect);
+    }
+
+    const oldCW = CW;
+    const oldCH = CH;
+    CW = newCW;
+    CH = newCH;
+
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(CW * dpr);
+    canvas.height = Math.round(CH * dpr);
+    canvas.style.width = displayW + 'px';
+    canvas.style.height = displayH + 'px';
+
+    if (initialized && (oldCW !== newCW || oldCH !== newCH)) {
+      remapEntities(oldCW, oldCH, newCW, newCH);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -239,7 +345,8 @@
   // ---------------------------------------------------------------------------
   function startGame() {
     state = 'playing';
-    startScreen.style.display = 'none';
+    startScreen.classList.add('hidden');
+    if (touchHintEl) touchHintEl.classList.remove('hidden');
   }
 
   function restartGame() {
@@ -255,7 +362,7 @@
     comboTimer = 0;
     bossActive = false;
     player.x = CW / 2;
-    player.y = CH - 100;
+    player.y = Math.max(player.h / 2 + 10, CH - 100);
     player.invincible = 60;
     player.powerLevel = 1;
     player.fireTimer = 0;
@@ -267,7 +374,8 @@
     powerups = [];
     explosions = [];
     bossBullets = [];
-    gameOverScreen.style.display = 'none';
+    gameOverScreen.classList.add('hidden');
+    if (touchHintEl) touchHintEl.classList.remove('hidden');
     state = 'playing';
   }
 
@@ -352,7 +460,7 @@
       fireRate: 30,
       flashTimer: 0,
       entering: true,
-      targetY: 100,
+      targetY: Math.min(100, CH * 0.2),
     };
     enemies.push(boss);
   }
@@ -419,9 +527,10 @@
 
     if (lives <= 0) {
       state = 'gameover';
-      gameOverScreen.style.display = 'block';
+      gameOverScreen.classList.remove('hidden');
+      if (touchHintEl) touchHintEl.classList.add('hidden');
       document.getElementById('finalScore').textContent = 'SCORE: ' + score.toLocaleString();
-      document.getElementById('finalWave').textContent = wave;
+      document.getElementById('finalWave').textContent = 'WAVES SURVIVED: ' + wave;
       document.getElementById('highScoreText').textContent =
         'HIGH SCORE: ' + (localStorage.getItem('ss3884_hs') || '0');
     }
@@ -593,6 +702,7 @@
       } else if (e.movePattern === 'zigzag') {
         e.x += Math.sin(e.moveTimer * 3 + e.movePhase) * 3;
       }
+      e.x = Math.max(e.w / 2 + 12, Math.min(CW - e.w / 2 - 12, e.x));
 
       // Enemy shooting
       if (e.type === 'shooter') {
@@ -765,8 +875,9 @@
     // Movement pattern
     b.phaseTimer++;
     b.x += Math.sin(b.moveTimer) * 2;
+    b.x = Math.max(b.w / 2 + 12, Math.min(CW - b.w / 2 - 12, b.x));
     b.y += Math.sin(b.moveTimer * 0.5) * 0.5;
-    b.y = Math.max(60, Math.min(180, b.y));
+    b.y = Math.max(60, Math.min(Math.min(180, CH * 0.35), b.y));
 
     // Firing patterns
     b.fireTimer++;
@@ -1327,6 +1438,7 @@
   // Main draw
   // ---------------------------------------------------------------------------
   function draw() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.save();
 
     // Screen shake
@@ -1448,12 +1560,21 @@
 
       // Combo display
       if (comboCount > 1) {
+        let comboY = 55;
+        if (hudInnerEl && canvas) {
+          const hudRect = hudInnerEl.getBoundingClientRect();
+          const canvasRect = canvas.getBoundingClientRect();
+          if (canvasRect.height > 0) {
+            const hudBottomLogical = ((hudRect.bottom - canvasRect.top) / canvasRect.height) * CH;
+            comboY = Math.max(55, Math.round(hudBottomLogical + 24));
+          }
+        }
         ctx.fillStyle = C.yellow;
         ctx.shadowColor = C.yellow;
         ctx.shadowBlur = 8;
         ctx.font = 'bold 18px monospace';
         ctx.textAlign = 'right';
-        ctx.fillText('COMBO x' + Math.min(comboCount, 10), CW - 30, 55);
+        ctx.fillText('COMBO x' + Math.min(comboCount, 10), CW - 30, comboY);
         ctx.shadowBlur = 0;
       }
     }
