@@ -82,11 +82,37 @@
   // ---------------------------------------------------------------------------
   // Input
   // ---------------------------------------------------------------------------
+  const STICK_MAX_RADIUS = 50;
+  const STICK_KNOB_RADIUS = 20;
+  const STICK_DEADZONE = 4;
+  const FIRE_BTN_RADIUS = 38;
+
   const keys = {};
-  let touchActive = false;
-  let touchX = 0, touchY = 0;
-  let lastTapTime = 0;
   let touchFiring = false;
+
+  const leftTouch = {
+    active: false,
+    id: null,
+    originX: 0,
+    originY: 0,
+    currentX: 0,
+    currentY: 0,
+    knobX: 0,
+    knobY: 0,
+    dx: 0,
+    dy: 0,
+    alpha: 0,
+  };
+
+  const rightTouch = {
+    active: false,
+    touchIds: new Set(),
+    x: 0,
+    y: 0,
+    alpha: 0,
+    pulse: 0,
+    tapQueued: false,
+  };
 
   // ---------------------------------------------------------------------------
   // Game arrays
@@ -216,6 +242,19 @@
       stars.length = targetStars;
     }
 
+    if (leftTouch.alpha > 0 || leftTouch.active) {
+      leftTouch.originX *= ratioX;
+      leftTouch.originY *= ratioY;
+      leftTouch.currentX *= ratioX;
+      leftTouch.currentY *= ratioY;
+      leftTouch.knobX *= ratioX;
+      leftTouch.knobY *= ratioY;
+    }
+    if (rightTouch.alpha > 0 || rightTouch.active) {
+      rightTouch.x *= ratioX;
+      rightTouch.y *= ratioY;
+    }
+
     rebuildGridLines();
   }
 
@@ -278,11 +317,163 @@
     });
   }
 
+  function getCanvasCoords(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? CW / rect.width : 1;
+    const scaleY = rect.height > 0 ? CH / rect.height : 1;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  }
+
+  function resetTouchState() {
+    leftTouch.active = false;
+    leftTouch.id = null;
+    leftTouch.dx = 0;
+    leftTouch.dy = 0;
+    leftTouch.alpha = 0;
+    leftTouch.knobX = leftTouch.originX;
+    leftTouch.knobY = leftTouch.originY;
+
+    rightTouch.active = false;
+    rightTouch.touchIds.clear();
+    rightTouch.alpha = 0;
+    rightTouch.pulse = 0;
+    rightTouch.tapQueued = false;
+    touchFiring = false;
+  }
+
+  function startLeftStick(id, x, y) {
+    leftTouch.active = true;
+    leftTouch.id = id;
+    leftTouch.originX = x;
+    leftTouch.originY = y;
+    leftTouch.currentX = x;
+    leftTouch.currentY = y;
+    leftTouch.knobX = x;
+    leftTouch.knobY = y;
+    leftTouch.dx = 0;
+    leftTouch.dy = 0;
+    leftTouch.alpha = 1;
+  }
+
+  function updateLeftStick(x, y) {
+    leftTouch.currentX = x;
+    leftTouch.currentY = y;
+
+    let rawDx = x - leftTouch.originX;
+    let rawDy = y - leftTouch.originY;
+    let dist = Math.hypot(rawDx, rawDy);
+
+    // Floating stick origin follows long drags so reversing direction responds immediately
+    if (dist > STICK_MAX_RADIUS) {
+      const excess = dist - STICK_MAX_RADIUS;
+      leftTouch.originX += (rawDx / dist) * excess;
+      leftTouch.originY += (rawDy / dist) * excess;
+      leftTouch.originX = Math.max(20, Math.min(CW / 2 - 10, leftTouch.originX));
+      leftTouch.originY = Math.max(20, Math.min(CH - 20, leftTouch.originY));
+      rawDx = x - leftTouch.originX;
+      rawDy = y - leftTouch.originY;
+      dist = Math.hypot(rawDx, rawDy);
+    }
+
+    if (dist > STICK_MAX_RADIUS && dist > 0) {
+      leftTouch.knobX = leftTouch.originX + (rawDx / dist) * STICK_MAX_RADIUS;
+      leftTouch.knobY = leftTouch.originY + (rawDy / dist) * STICK_MAX_RADIUS;
+    } else {
+      leftTouch.knobX = x;
+      leftTouch.knobY = y;
+    }
+
+    if (dist > STICK_DEADZONE && dist > 0) {
+      const mag = Math.min(1, (dist - STICK_DEADZONE) / (STICK_MAX_RADIUS - STICK_DEADZONE));
+      leftTouch.dx = (rawDx / dist) * mag;
+      leftTouch.dy = (rawDy / dist) * mag;
+    } else {
+      leftTouch.dx = 0;
+      leftTouch.dy = 0;
+    }
+  }
+
+  function endLeftStick() {
+    leftTouch.active = false;
+    leftTouch.id = null;
+    leftTouch.dx = 0;
+    leftTouch.dy = 0;
+    leftTouch.knobX = leftTouch.originX;
+    leftTouch.knobY = leftTouch.originY;
+  }
+
+  function startRightFire(id, x, y) {
+    rightTouch.touchIds.add(id);
+    rightTouch.active = true;
+    rightTouch.x = x;
+    rightTouch.y = y;
+    rightTouch.alpha = 1;
+    rightTouch.pulse = 0;
+    rightTouch.tapQueued = true;
+    touchFiring = true;
+  }
+
+  function endRightFire(id) {
+    rightTouch.touchIds.delete(id);
+    if (rightTouch.touchIds.size === 0) {
+      rightTouch.active = false;
+      touchFiring = false;
+    }
+  }
+
   function setupTouch() {
     canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
     canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
     canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
     canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+    let mouseDownZone = null;
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0 || state !== 'playing') return;
+      const pos = getCanvasCoords(e.clientX, e.clientY);
+      if (pos.x < CW / 2) {
+        if (!leftTouch.active) {
+          mouseDownZone = 'left';
+          startLeftStick('mouse', pos.x, pos.y);
+        }
+      } else {
+        mouseDownZone = 'right';
+        startRightFire('mouse', pos.x, pos.y);
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!mouseDownZone || state !== 'playing') return;
+      const pos = getCanvasCoords(e.clientX, e.clientY);
+      if (mouseDownZone === 'left' && leftTouch.active && leftTouch.id === 'mouse') {
+        updateLeftStick(pos.x, pos.y);
+      } else if (mouseDownZone === 'right' && rightTouch.touchIds.has('mouse')) {
+        rightTouch.x = Math.max(CW / 2 + 10, pos.x);
+        rightTouch.y = pos.y;
+      }
+    });
+
+    const endMouseControl = () => {
+      if (!mouseDownZone) return;
+      if (mouseDownZone === 'left' && leftTouch.active && leftTouch.id === 'mouse') {
+        endLeftStick();
+      } else if (mouseDownZone === 'right' && rightTouch.touchIds.has('mouse')) {
+        endRightFire('mouse');
+      }
+      mouseDownZone = null;
+    };
+
+    canvas.addEventListener('mouseup', endMouseControl);
+    canvas.addEventListener('mouseleave', endMouseControl);
+    window.addEventListener('mouseup', endMouseControl);
+    window.addEventListener('blur', () => {
+      mouseDownZone = null;
+      resetTouchState();
+    });
 
     // Also handle click for the start screen on mobile
     startScreen.addEventListener('touchstart', (e) => {
@@ -301,55 +492,96 @@
     if (state === 'start') { startGame(); return; }
     if (state === 'gameover') return;
 
-    const touch = e.touches[0];
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = CW / rect.width;
-    const scaleY = CH / rect.height;
+    const list = e.changedTouches || e.touches;
+    if (!list) return;
 
-    touchActive = true;
-    touchX = (touch.clientX - rect.left) * scaleX;
-    touchY = (touch.clientY - rect.top) * scaleY;
+    for (let i = 0; i < list.length; i++) {
+      const touch = list[i];
+      const pos = getCanvasCoords(touch.clientX, touch.clientY);
+      const id = touch.identifier !== undefined ? touch.identifier : 0;
 
-    // Double-tap detection
-    const now = Date.now();
-    if (now - lastTapTime < 300) {
-      touchFiring = true;
+      if (pos.x < CW / 2) {
+        if (!leftTouch.active) {
+          startLeftStick(id, pos.x, pos.y);
+        }
+      } else {
+        startRightFire(id, pos.x, pos.y);
+      }
     }
-    lastTapTime = now;
-
-    // Hold to fire as well (after initial movement)
-    setTimeout(() => {
-      if (touchActive) touchFiring = true;
-    }, 400);
   }
 
   function handleTouchMove(e) {
     e.preventDefault();
-    if (!touchActive) return;
-    const touch = e.touches[0];
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = CW / rect.width;
-    const scaleY = CH / rect.height;
-    touchX = (touch.clientX - rect.left) * scaleX;
-    touchY = (touch.clientY - rect.top) * scaleY;
+    if (state !== 'playing') return;
+
+    const list = e.changedTouches || e.touches;
+    if (!list) return;
+
+    for (let i = 0; i < list.length; i++) {
+      const touch = list[i];
+      const pos = getCanvasCoords(touch.clientX, touch.clientY);
+      const id = touch.identifier !== undefined ? touch.identifier : 0;
+
+      if (leftTouch.active && (leftTouch.id === id || touch.identifier === undefined)) {
+        updateLeftStick(pos.x, pos.y);
+      } else if (rightTouch.touchIds.has(id)) {
+        rightTouch.x = Math.max(CW / 2 + 10, pos.x);
+        rightTouch.y = pos.y;
+      }
+    }
   }
 
   function handleTouchEnd(e) {
     e.preventDefault();
-    touchActive = false;
-    touchFiring = false;
+
+    const list = e.changedTouches;
+    if (list && list.length > 0) {
+      for (let i = 0; i < list.length; i++) {
+        const touch = list[i];
+        const id = touch.identifier !== undefined ? touch.identifier : 0;
+        if (leftTouch.active && leftTouch.id === id) {
+          endLeftStick();
+        }
+        if (rightTouch.touchIds.has(id)) {
+          endRightFire(id);
+        }
+      }
+    }
+
+    if (e.touches) {
+      const activeIds = new Set();
+      for (let i = 0; i < e.touches.length; i++) {
+        const t = e.touches[i];
+        activeIds.add(t.identifier !== undefined ? t.identifier : 0);
+      }
+      if (leftTouch.active && !activeIds.has(leftTouch.id)) {
+        endLeftStick();
+      }
+      for (const id of Array.from(rightTouch.touchIds)) {
+        if (!activeIds.has(id)) {
+          endRightFire(id);
+        }
+      }
+    } else if (!list || list.length === 0) {
+      endLeftStick();
+      for (const id of Array.from(rightTouch.touchIds)) {
+        endRightFire(id);
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
   // Game state management
   // ---------------------------------------------------------------------------
   function startGame() {
+    resetTouchState();
     state = 'playing';
     startScreen.classList.add('hidden');
     if (touchHintEl) touchHintEl.classList.remove('hidden');
   }
 
   function restartGame() {
+    resetTouchState();
     score = 0;
     lives = 3;
     wave = 1;
@@ -527,6 +759,7 @@
 
     if (lives <= 0) {
       state = 'gameover';
+      resetTouchState();
       gameOverScreen.classList.remove('hidden');
       if (touchHintEl) touchHintEl.classList.add('hidden');
       document.getElementById('finalScore').textContent = 'SCORE: ' + score.toLocaleString();
@@ -577,15 +810,36 @@
       if (keys['ArrowDown'] || keys['KeyS']) player.y += spd;
     }
 
-    // Touch movement — lerp toward touch position
-    if (touchActive) {
-      const dx = touchX - player.x;
-      const dy = (touchY - 40) - player.y; // offset so finger doesn't cover ship
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > 3) {
-        const moveSpeed = Math.min(spd * 1.5, dist * 0.15);
-        player.x += (dx / dist) * moveSpeed;
-        player.y += (dy / dist) * moveSpeed;
+    // Touch movement — virtual analog stick on left side
+    if (leftTouch.active) {
+      const rawDx = leftTouch.currentX - leftTouch.originX;
+      const rawDy = leftTouch.currentY - leftTouch.originY;
+      const dist = Math.hypot(rawDx, rawDy);
+      if (dist > STICK_DEADZONE) {
+        const normMag = Math.min(1, (dist - STICK_DEADZONE) / (STICK_MAX_RADIUS - STICK_DEADZONE));
+        const moveSpeed = spd * 1.25 * normMag;
+        player.x += (rawDx / dist) * moveSpeed;
+        player.y += (rawDy / dist) * moveSpeed;
+      }
+    }
+
+    // Touch control indicator fade & pulse animations
+    if (leftTouch.active) {
+      leftTouch.alpha = 1;
+    } else if (leftTouch.alpha > 0) {
+      leftTouch.alpha = Math.max(0, leftTouch.alpha - 0.08);
+    }
+
+    if (rightTouch.active) {
+      rightTouch.alpha = 1;
+      rightTouch.pulse = Math.min(1, rightTouch.pulse + 0.07);
+      if (rightTouch.pulse >= 1) rightTouch.pulse = 0;
+    } else {
+      if (rightTouch.pulse < 1) {
+        rightTouch.pulse = Math.min(1, rightTouch.pulse + 0.08);
+      }
+      if (rightTouch.alpha > 0) {
+        rightTouch.alpha = Math.max(0, rightTouch.alpha - 0.07);
       }
     }
 
@@ -602,11 +856,16 @@
     }
 
     // ---- Firing ----
-    const firing = keys['Space'] || keys['KeyZ'] || touchFiring;
+    const firing = keys['Space'] || keys['KeyZ'] || touchFiring || rightTouch.active || rightTouch.tapQueued;
     if (firing) {
+      if (rightTouch.tapQueued && player.fireTimer > 0) {
+        // Allow distinct taps to fire promptly while respecting a brief minimum cadence
+        player.fireTimer = Math.min(player.fireTimer, 1);
+      }
       player.fireTimer--;
       if (player.fireTimer <= 0) {
         player.fireTimer = player.fireRate;
+        rightTouch.tapQueued = false;
         const bSpeed = -12;
 
         // Center shot
@@ -1435,6 +1694,180 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Draw semi-visible touch controls (left analog stick & right fire button)
+  // ---------------------------------------------------------------------------
+  function drawTouchControls() {
+    if (leftTouch.alpha <= 0.01 && rightTouch.alpha <= 0.01) return;
+
+    ctx.save();
+
+    // Subtle split-screen zone divider
+    ctx.strokeStyle = C.sky;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.08 * Math.max(leftTouch.alpha, rightTouch.alpha);
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath();
+    ctx.moveTo(CW / 2, 16);
+    ctx.lineTo(CW / 2, CH - 16);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Left virtual analog stick
+    if (leftTouch.alpha > 0.01) {
+      const ox = leftTouch.originX;
+      const oy = leftTouch.originY;
+      const kx = leftTouch.knobX;
+      const ky = leftTouch.knobY;
+      const a = leftTouch.alpha;
+
+      // Outer base ring
+      ctx.fillStyle = C.navy;
+      ctx.globalAlpha = 0.22 * a;
+      ctx.beginPath();
+      ctx.arc(ox, oy, STICK_MAX_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = C.sky;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.38 * a;
+      ctx.beginPath();
+      ctx.arc(ox, oy, STICK_MAX_RADIUS, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner guide ring
+      ctx.strokeStyle = C.blue;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.22 * a;
+      ctx.beginPath();
+      ctx.arc(ox, oy, STICK_MAX_RADIUS * 0.55, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Cardinal direction ticks
+      ctx.strokeStyle = C.cyan;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.3 * a;
+      const tickIn = STICK_MAX_RADIUS * 0.78;
+      const tickOut = STICK_MAX_RADIUS * 0.96;
+      for (let i = 0; i < 4; i++) {
+        const ang = (i * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.moveTo(ox + Math.cos(ang) * tickIn, oy + Math.sin(ang) * tickIn);
+        ctx.lineTo(ox + Math.cos(ang) * tickOut, oy + Math.sin(ang) * tickOut);
+        ctx.stroke();
+      }
+
+      // Center anchor dot
+      ctx.fillStyle = C.sky;
+      ctx.globalAlpha = 0.35 * a;
+      ctx.beginPath();
+      ctx.arc(ox, oy, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Vector shaft from origin to thumb knob
+      ctx.strokeStyle = C.cyan;
+      ctx.lineWidth = 2.5;
+      ctx.globalAlpha = 0.35 * a;
+      ctx.beginPath();
+      ctx.moveTo(ox, oy);
+      ctx.lineTo(kx, ky);
+      ctx.stroke();
+
+      // Draggable thumb knob
+      ctx.fillStyle = C.sky;
+      ctx.globalAlpha = 0.32 * a;
+      ctx.beginPath();
+      ctx.arc(kx, ky, STICK_KNOB_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = C.cyan;
+      ctx.globalAlpha = 0.45 * a;
+      ctx.beginPath();
+      ctx.arc(kx, ky, STICK_KNOB_RADIUS * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = C.cyan;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.58 * a;
+      ctx.beginPath();
+      ctx.arc(kx, ky, STICK_KNOB_RADIUS, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Right fire button indicator
+    if (rightTouch.alpha > 0.01) {
+      const fx = rightTouch.x;
+      const fy = rightTouch.y;
+      const a = rightTouch.alpha;
+
+      // Expanding ripple pulse ring
+      const pulseRadius = FIRE_BTN_RADIUS * (0.85 + rightTouch.pulse * 0.55);
+      ctx.strokeStyle = C.orange;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.35 * (1 - rightTouch.pulse) * a;
+      ctx.beginPath();
+      ctx.arc(fx, fy, pulseRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Outer button housing ring
+      ctx.fillStyle = C.navy;
+      ctx.globalAlpha = 0.24 * a;
+      ctx.beginPath();
+      ctx.arc(fx, fy, FIRE_BTN_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = C.pink;
+      ctx.lineWidth = 2.5;
+      ctx.globalAlpha = 0.45 * a;
+      ctx.beginPath();
+      ctx.arc(fx, fy, FIRE_BTN_RADIUS, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner tactile pad
+      const padRadius = rightTouch.active ? 22 : 24;
+      ctx.fillStyle = C.red;
+      ctx.globalAlpha = 0.32 * a;
+      ctx.beginPath();
+      ctx.arc(fx, fy, padRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = C.yellow;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.5 * a;
+      ctx.beginPath();
+      ctx.arc(fx, fy, padRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner core
+      ctx.fillStyle = C.orange;
+      ctx.globalAlpha = 0.4 * a;
+      ctx.beginPath();
+      ctx.arc(fx, fy, 11, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 4 targeting crosshair ticks around inner core
+      ctx.strokeStyle = C.yellow;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.55 * a;
+      for (let i = 0; i < 4; i++) {
+        const ang = (i * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.moveTo(fx + Math.cos(ang) * 14, fy + Math.sin(ang) * 14);
+        ctx.lineTo(fx + Math.cos(ang) * 20, fy + Math.sin(ang) * 20);
+        ctx.stroke();
+      }
+
+      // Subtle center reticle dot
+      ctx.fillStyle = C.white;
+      ctx.globalAlpha = 0.55 * a;
+      ctx.beginPath();
+      ctx.arc(fx, fy, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------------------
   // Main draw
   // ---------------------------------------------------------------------------
   function draw() {
@@ -1577,6 +2010,9 @@
         ctx.fillText('COMBO x' + Math.min(comboCount, 10), CW - 30, comboY);
         ctx.shadowBlur = 0;
       }
+
+      // Mobile touch controls overlay
+      if (state === 'playing') drawTouchControls();
     }
 
     ctx.restore();

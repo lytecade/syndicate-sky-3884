@@ -16,9 +16,8 @@ A sci-fi space shooter inspired by *1942*. Blast through waves of hostile corpor
 
 | Gesture | Action |
 |---------|--------|
-| **Tap & drag** | Move spacecraft toward touch point |
-| **Double tap** | Fire weapons |
-| **Hold** | Sustained fire after short delay |
+| **Tap & drag (left side)** | Virtual analog stick to steer spacecraft |
+| **Tap or hold (right side)** | Fire weapons (hold for sustained fire) |
 
 ## Features
 
